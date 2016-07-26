@@ -1,11 +1,10 @@
 #include "newtypes.h"
 #include "spi_sd.h"
-
+#include "FAT.h"
 #include "AUDIO.h"
 #include "altera_up_avalon_audio_regs_dgz.h"
 #include "altera_up_avalon_audio_dgz.h"
 #include <math.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,90 +13,6 @@
 #include <alt_types.h>
 #include "io.h"
 #include "system.h"
-#define mboot 0
-#define size 512
-
-typedef struct
-{
-	euint16 bytes_per_sec;
-	euint8 sec_per_clust;
-	euint16 res_sec;
-	euint8 FAT_num;
-	euint16 sec_num_small;
-	euint32 sec_num_big;
-	euint32 sec_per_FAT;
-	euint32 clust_num;
-}part_boot;
-
-typedef struct
-{
-	euint8 name[9];
-	euint8 extension[4];
-	euint8 attributes;
-	euint16 startH;
-	euint16 startL;
-	euint32 file_size;
-	euint8 valid;
-}SDfile;
-
-typedef struct
-{
-	euint8 name[9];
-	euint8 extension[4];
-	euint8 attributes;
-	euint16 startH;
-	euint16 startL;
-	euint32 ParentAdd;
-	euint8 valid;
-}SDfolder;
-typedef struct
-{
-	euint32 *DataBlocks;
-	euint32 noDataBlocks;
-
-}SDfileContents;
-
-
-euint8 SD_init(void);
-euint8 read_mboot(euint8* buffer);
-euint8 read_part_boot();
-euint8 read_rootTable(euint32 LBABegin,euint32 ResSect);
-euint8 read_directory(SDfile* File,SDfolder* Folders,SDfolder CurrentFolder);
-euint8 ls(SDfile* File,SDfolder* Folders);
-euint8 strCopyLen(euint8* s,euint8* d,euint16 offset);
-euint16 LastIndexOf(char c,euint8* s);
-euint8 cd(euint8* FolderName);
-euint32 strcompare2(char* buf1,char* buf2);
-char string_parser2(char* inp, char* array_of_words[]);
-euint32 trim(char* buf);
-euint8 putty_ls();
-void strChomp(euint8* s);
-euint32 read_file_chain_length(SDfile fileInfo);
-euint8 putty_cd(euint8* path);
-euint8 read_file_chunk(SDfile fileInfo,euint8* buffer,euint32 bufferLength,euint32 bufferNo);
-alt_8 UART_write(alt_8* str);
-alt_8 list_directory(char no_args, char* arg_strings[]);
-alt_8 change_directory(char no_args, char* arg_strings[]);
-alt_8 play_file(char no_args, char* arg_strings[]);
-
-euint8 open_wav(SDfile fileinfo);
-euint32 get_wav_header(char* buffer, euint32* sample_rate, euint32* bitdepth,  euint32* channels, euint32* formatcode, euint32* blocksize);
-euint32 extract_big(char* str, euint32 ofset, euint32 n);
-euint32 extract_little(char* str, euint32 ofset, euint32 n);
-euint32 next_sect_address(euint32 address,euint32* next_FAT_address);
-
-int audio_initialise(void);
-void UARTListener(char buffer[],euint32 uart);
-euint32 strcompare(char* buf1,char* buf2);
-char string_parser(char* inp, char* array_of_words[]);
-
-
-// structure for commands
-typedef struct
-{
-	char* com_string;
-	alt_32 (*com_fun)(char no_args, char* arg_strings[]);
-} command;
 
 //list of command types
 const command list[] =
@@ -122,20 +37,16 @@ euint32 main(void)
 	//initialise variables
 	euint8 buffersd[size];
 	euint32 i;
-	currDir.ParentAdd=0;
+	currDir.ParentAdd = 0;
 	currDir.name[0] = '/';
 	currDir.name[1] = 0;
-	currDir.startH=0;
-	currDir.startL=2;
-	root.ParentAdd=0;
+	currDir.startH = 0;
+	currDir.startL = 2;
+	root.ParentAdd = 0;
 	root.name[0] = '/';
 	root.name[1] = 0;
-	root.startH=0;
-	root.startL=2;
-
-	/*SDfile File[20];
-	SDfolder Folder[20];
-	SDfolder currDir;*/
+	root.startH = 0;
+	root.startL = 2;
 
 	audio_initialise();
 
@@ -144,7 +55,6 @@ euint32 main(void)
 	printf("UART Ready.\n");
 	UART_write("UART Ready.\r\n");
 	// Initialise file system
-
 	if(SD_init()==1)
 		{
 			printf("Could not open filesystem.\n");
@@ -156,10 +66,8 @@ euint32 main(void)
 			printf("File System Ready.\r\n");
 			UART_write("File System Ready.\r\n");
 		}
-
-
+		
 	read_mboot(buffersd);
-
 	//calculates LBAbegin
 	for(i=454;i<459;i++)
 	{
@@ -167,12 +75,10 @@ euint32 main(void)
 	}
 
 	read_part_boot(LBAbegin,&Part_Boot); //reads the partition boot and fills the global variable
-
-
 	char buffer[128];
 	char* array[10];
 	char* temp[10];
-	while(1)//loop forever and ever.. and ever..
+	while(1)
 	{
 		UART_write(">");
 		if(uart_file == 0)
@@ -180,37 +86,28 @@ euint32 main(void)
 			printf("Sorry UART open failed\r\n");
 			return(-1);//error
 		}
-
 		euint32 number;
 		euint32 xx=0;
-
 		for(xx=0;xx<128;xx++)
 		{
 			buffer[xx]=0;//empty buffer
 		}
-
 		for(xx=0;xx<10;xx++)
 		{
 			array[xx] = 0;
 			temp[xx]=0;
 		}
-
 		UARTListener(&buffer,uart_file);
-
 		number = string_parser(buffer,array);
-		euint32 i;
-		i=0;
-
+		euint32 i = 0;
 		// search through commands to find match
 		if(array[0]!=0)
 		{
 			for(i=0;i<3;i++)
 			{
-
 				//if string match found
 				 if (strcompare(array[0],list[i].com_string)==0)
 				{
-
 					//extract the arguments of command
 					euint32 j;
 					for( j=0;j<number-1;j++)
@@ -218,7 +115,6 @@ euint32 main(void)
 						temp[j] = array[j+1];
 						//free(array[j+1]);
 					}
-
 					//call relative function
 					list[i].com_fun((number-1),temp);
 					for( j=0;j<number-1;j++)
@@ -236,28 +132,22 @@ euint32 main(void)
 		}
 		free(array[0]);
 	}
-
 	return 0;
 }
-
-
 alt_8 UART_write(alt_8* str)
 {
-
 	alt_8 len = strlen(str);
-		 write(uart_file,str,len);
-		 return 1;//worked
+	write(uart_file,str,len);
+	return 1;//worked
 }
-
 
 alt_8 list_directory(char no_args, char* arg_strings[])
 {
 	if(no_args==0)
-putty_ls();
+		putty_ls();
 	else
 		UART_write("ls only works on current dir\r\n");
 }
-
 
 alt_8 change_directory(char no_args, char* arg_strings[])
 {
@@ -268,10 +158,8 @@ alt_8 change_directory(char no_args, char* arg_strings[])
 		}
 }
 
-
 alt_8 play_file(char no_args, char* arg_strings[])
 {
-
 	//first we need to open the file
 	if(no_args!=1)
 	{
@@ -280,56 +168,55 @@ alt_8 play_file(char no_args, char* arg_strings[])
 	}
 	euint8 FFound=0;
 	SDfile File[200];
-		SDfolder Folder[200];
-		read_directory(File,Folder,currDir);
-		//loaded in stuffs
-		euint16 i=0;
-		for(i=0;i<20;i++)
+	SDfolder Folder[200];
+	read_directory(File,Folder,currDir);
+	euint16 i=0;
+	for(i=0;i<20;i++)
+	{
+		if(File[i].valid==1)
 		{
-			if(File[i].valid==1)
+			euint8 fname[15];
+			euint8 x=0,y=0;
+			for(x=0;x<8;x++)
 			{
-				euint8 fname[15];
-				euint8 x=0,y=0;
-				for(x=0;x<8;x++)
-				{
-					if(File[i].name[x]!=0x20 && File[i].name[x]!=0x00)
-					{//if char is not null and is not space
-						fname[y] = File[i].name[x];
-						++y;
-					}
-					else
-						x=12;
+				if(File[i].name[x]!=0x20 && File[i].name[x]!=0x00)
+				{//if char is not null and is not space
+					fname[y] = File[i].name[x];
+					++y;
 				}
-				fname[y]='.';
-				++y;
-				for(x=0;x<3;x++)
-				{
-					if(File[i].extension[x]!=0x20 && File[i].extension[x]!=0x00)
-					{//if char is not null and is not space
-						fname[y] = File[i].extension[x];
-						++y;
-					}
-					else
-						x=12;
+				else
+					x=12;
+			}
+			fname[y]='.';
+			++y;
+			for(x=0;x<3;x++)
+			{
+				if(File[i].extension[x]!=0x20 && File[i].extension[x]!=0x00)
+				{//if char is not null and is not space
+					fname[y] = File[i].extension[x];
+					++y;
 				}
-				//file is a valid file
-				fname[y]=0;//add null terminator
-				if(strcompare2(fname,arg_strings[0])==0)
-				{
-					FFound=1;
-					open_wav(File[i]);
-				}
+				else
+					x=12;
+			}
+			//file is a valid file
+			fname[y]=0;//add null terminator
+			if(strcompare2(fname,arg_strings[0])==0)
+			{
+				FFound=1;
+				open_wav(File[i]);
 			}
 		}
-		/*
-		euint8 buffer[512];
-		read_file_chunk(File[6],buffer,512,0);
-		*/
-		if(FFound==0)
-		{
-			UART_write("That File cannot be found, check spelling and try again\r\n");
-		}
-		FFound=0;
+	}
+	/*
+	euint8 buffer[512];
+	read_file_chunk(File[6],buffer,512,0);
+	*/
+	if(FFound==0)
+	{
+		UART_write("That File cannot be found, check spelling and try again\r\n");
+	}
+	FFound=0;
 }
 
 euint8 open_wav(SDfile fileinfo)
@@ -398,8 +285,6 @@ euint8 open_wav(SDfile fileinfo)
 			UART_write("Error, sample rate is incorrect\n\r");
 			return(1);
 		}
-
-
 	switch(sample_rate)
 		{
 		  case 8000:  AUDIO_SetSampleRate(RATE_ADC8K_DAC8K_USB); break;
@@ -409,166 +294,126 @@ euint8 open_wav(SDfile fileinfo)
 		  case 96000: AUDIO_SetSampleRate(RATE_ADC96K_DAC96K_USB); break;
 		  default:  printf("Non-standard sampling rate\n"); return -1;
 	   }
-
 	count = count + header_size;
-
 	while(end_of_file == 0)	//start reading bytes from offset position, if  there are bytes to be read, continue
-	   {
-			//convert char buffer into 32 bit buffer
-
-			while(LoopC < Part_Boot.sec_per_clust)
+	{
+		//convert char buffer into 32 bit buffer
+		while(LoopC < Part_Boot.sec_per_clust)
+		{
+			if(bitdepth == 32)
 			{
-
-				if(bitdepth == 32)
+				for(i=0;i<128;i++)
 				{
-					for(i=0;i<128;i++)
+					*((unsigned char*)&buff2[i]+0) = buff[count+0];
+					*((unsigned char*)&buff2[i]+1) = buff[count+1];
+					*((unsigned char*)&buff2[i]+2) = buff[count+2];
+					*((unsigned char*)&buff2[i]+3) = buff[count+3];
+					count += 4;
+					if(count > 512)
 					{
-						*((unsigned char*)&buff2[i]+0) = buff[count+0];
-						*((unsigned char*)&buff2[i]+1) = buff[count+1];
-						*((unsigned char*)&buff2[i]+2) = buff[count+2];
-						*((unsigned char*)&buff2[i]+3) = buff[count+3];
-						count += 4;
-
-						if(count > 512)
-						{
-							ints_to_send = i+1;
-							break;
-						}
-						if(i==127) ints_to_send = i+1;
+						ints_to_send = i+1;
+						break;
 					}
-					count = 0;
+					if(i==127) ints_to_send = i+1;
 				}
-
-				if(bitdepth == 24)
+				count = 0;
+			}
+			if(bitdepth == 24)
+			{
+				for(i=0;i<170;i++)		// PROBLEM HERE PROBS SINCE 512/3 ISNT WHOLE NUMBER
 				{
-
-					for(i=0;i<170;i++)		// PROBLEM HERE PROBS SINCE 512/3 ISNT WHOLE NUMBER
+					*((unsigned char*)&buff2[i]+0) = 0;
+					*((unsigned char*)&buff2[i]+1) = buff[count+0];
+					*((unsigned char*)&buff2[i]+2) = buff[count+1];
+					*((unsigned char*)&buff2[i]+3) = buff[count+2];
+					count += 3;
+					if(count >= 512)
 					{
-						*((unsigned char*)&buff2[i]+0) = 0;
-						*((unsigned char*)&buff2[i]+1) = buff[count+0];
-						*((unsigned char*)&buff2[i]+2) = buff[count+1];
-						*((unsigned char*)&buff2[i]+3) = buff[count+2];
-						count += 3;
-
-						if(count >= 512)
-						{
-							count = (count-512)+3;
-							ints_to_send = i+1;
-							break;
-						}
-						//if(i==169) ints_to_send = i+1;
-
+						count = (count-512)+3;
+						ints_to_send = i+1;
+						break;
 					}
-
-				}
-
-				if(bitdepth == 16)
-				{
-					for(i=0;i<256;i++)
-					{
-						*((unsigned char*)&buff2[i]+0) = 0;
-						*((unsigned char*)&buff2[i]+1) = 0;
-						*((unsigned char*)&buff2[i]+2) = buff[count+0];
-						*((unsigned char*)&buff2[i]+3) = buff[count+1];
-						count += 2;
-
-						if(count > 512)
-						{
-							ints_to_send = i+1;
-							break;
-						}
-						if(i==255) ints_to_send = i+1;
-					}
-					count = 0;
-				}
-
-				if(bitdepth == 8)
-				{
-					for(i=0;i<512;i++)
-					{
-						*((unsigned char*)&buff2[i]+0) = 0;
-						*((unsigned char*)&buff2[i]+1) = 0;
-						*((unsigned char*)&buff2[i]+2) = 0;
-						*((unsigned char*)&buff2[i]+3) = buff[count+0];
-						count++;
-
-						if(count > 512)
-						{
-							ints_to_send = i+1;
-							break;
-						}
-						if(i==511) ints_to_send = i+1;
-					}
-					count = 0;
-				}
-
-
-
-				// pass to left and right channels
-				for(i=0;i<256;i++)
-				{
-					left[i] = buff2[i*2];
-					right[i] = buff2[i*2+1];
-				}
-
-				if(end_offset != 0)
-				{
-					stuff_to_write = end_offset/(1024/ints_to_send);
-					end_of_file = 1;
-					end_offset = 0;
-				}
-				else
-				{
-					stuff_to_write = ints_to_send/2;
-				}
-
-
-				//is there space in the fifo?
-				while(alt_up_audio_write_fifo_space(audio_dev,0) < stuff_to_write);
-
-				//send to audio channels
-				alt_up_audio_write_fifo(audio_dev,right,stuff_to_write,ALT_UP_AUDIO_RIGHT);
-				alt_up_audio_write_fifo(audio_dev,left,stuff_to_write,ALT_UP_AUDIO_LEFT);
-
-
-
-				clust_address++;
-				sd_readSector(clust_address,buff);
-				bytes_read += 512;
-				LoopC++;
-
-
-				if(bytes_read >= filesize)
-				{
-					end_of_file = 1;
-					//end_offset = 512 - (bytes_read-filesize);
 				}
 			}
+			if(bitdepth == 16)
+			{
+				for(i=0;i<256;i++)
+				{
+					*((unsigned char*)&buff2[i]+0) = 0;
+					*((unsigned char*)&buff2[i]+1) = 0;
+					*((unsigned char*)&buff2[i]+2) = buff[count+0];
+					*((unsigned char*)&buff2[i]+3) = buff[count+1];
+					count += 2;
 
-			LoopC = 0;
+					if(count > 512)
+					{
+						ints_to_send = i+1;
+						break;
+					}
+					if(i==255) ints_to_send = i+1;
+				}
+				count = 0;
+			}
+			if(bitdepth == 8)
+			{
+				for(i=0;i<512;i++)
+				{
+					*((unsigned char*)&buff2[i]+0) = 0;
+					*((unsigned char*)&buff2[i]+1) = 0;
+					*((unsigned char*)&buff2[i]+2) = 0;
+					*((unsigned char*)&buff2[i]+3) = buff[count+0];
+					count++;
 
-			clust_address = next_sect_address(FAT_address,&next_address);
-			FAT_address = next_address;
+					if(count > 512)
+					{
+						ints_to_send = i+1;
+						break;
+					}
+					if(i==511) ints_to_send = i+1;
+				}
+				count = 0;
+			}
+			// pass to left and right channels
+			for(i=0;i<256;i++)
+			{
+				left[i] = buff2[i*2];
+				right[i] = buff2[i*2+1];
+			}
 
-			//sd_readSector(clust_address,buff);	//read in next 512 bytes
-			//bytes_read += 512;
-
+			if(end_offset != 0)
+			{
+				stuff_to_write = end_offset/(1024/ints_to_send);
+				end_of_file = 1;
+				end_offset = 0;
+			}
+			else
+			{
+				stuff_to_write = ints_to_send/2;
+			}
+			//is there space in the fifo?
+			while(alt_up_audio_write_fifo_space(audio_dev,0) < stuff_to_write);
+			//send to audio channels
+			alt_up_audio_write_fifo(audio_dev,right,stuff_to_write,ALT_UP_AUDIO_RIGHT);
+			alt_up_audio_write_fifo(audio_dev,left,stuff_to_write,ALT_UP_AUDIO_LEFT);
+			clust_address++;
+			sd_readSector(clust_address,buff);
+			bytes_read += 512;
+			LoopC++;
 			if(bytes_read >= filesize)
 			{
 				end_of_file = 1;
 				//end_offset = 512 - (bytes_read-filesize);
 			}
-	   }
-
-	//first check that EOF is not in the first 512 bytes
-	//for first bit of data, just send 512 - wav header size
-	// first check fifo for room and then send to audio outs
-	// after that, read in the next 512 bytes by incrementing sect_address
-	// check data for EOF
-	// check fifo again and send to audio outs
-	// read in another 512
-	// if EOF is found, mark the position and only send data up to EOF
-
+		}
+		LoopC = 0;
+		clust_address = next_sect_address(FAT_address,&next_address);
+		FAT_address = next_address;
+		if(bytes_read >= filesize)
+		{
+			end_of_file = 1;
+			//end_offset = 512 - (bytes_read-filesize);
+		}
+	}
 	return(0);
 }
 
@@ -591,23 +436,17 @@ euint32 next_sect_address(euint32 address,euint32* next_FAT_address)
 	euint32 relative_address;
 	euint32 next_address;
 	euint8 i;
-
+	
 	FAT_address = FAT_start + FATnumber;
 	relative_address = (address*4 + FAT_start*512) - FAT_address*512;
-
-
 	relative_address = (address*4)%512;
-
 	sd_readSector(FAT_address,buffer);
-
 	next_address = 	(euint32)buffer[relative_address]
 	             | 	((euint32)buffer[relative_address+1])<<8
 	             |	((euint32)buffer[relative_address+2])<<16
 	             |	((euint32)buffer[relative_address+3])<<24;
-
 	*next_FAT_address = next_address;
 	next_address = (next_address -2)*Part_Boot.sec_per_clust + clust_start;
-
 	return(next_address);
 }
 
@@ -665,7 +504,6 @@ euint32 get_wav_header(char* buffer, euint32* sample_rate, euint32* bitdepth,  e
     data.ckID[4] = 0x0;
 
     riff.ChunkSize = extract_little(header,4,4);
-
     wave.cksize = extract_little(header,16,4);
     wave.FormatCode = extract_little(header,20,2);
     wave.Channels = extract_little(header,22,2);
@@ -673,9 +511,7 @@ euint32 get_wav_header(char* buffer, euint32* sample_rate, euint32* bitdepth,  e
     wave.BytesPerSec = extract_little(header,28,4);
     wave.BlockAlign = extract_little(header,32,2);
     wave.BitsPerSample = extract_little(header,34,2);
-
     data.cksize = extract_little(header,40,4);
-
     //euint32 header_size = riff.ChunkSize - data.cksize + 8; //size of the header portion
     euint32 header_size = 44;
     *sample_rate = wave.SamplesPerSec;
@@ -692,8 +528,8 @@ euint8 putty_ls()
 	SDfile File[20];
 	SDfolder Folder[20];
 	read_directory(File,Folder,currDir);
-		ls(File,Folder);
-		return 0;
+	ls(File,Folder);
+	return 0;
 }
 
 euint8 putty_cd(euint8* path)
@@ -713,27 +549,27 @@ euint8 putty_cd(euint8* path)
 
 	printf("-->%s\n",path);
 	char* tokens[20];
-   euint8 count = string_parser2(path,tokens);
-   euint8 i=0;
-   euint8 abort=0;
-   for(i=0;i<count;i++)
-   {
+   	euint8 count = string_parser2(path,tokens);
+   	euint8 i=0;
+   	euint8 abort=0;
+   	for(i=0;i<count;i++)
+   	{
 	   printf("->%s\n", tokens[i]);
 	   if(abort==0)
-	   if(cd( tokens[i])!=0)
-		{
-	   abort=1;
-		}
-		free(tokens[i]);
+	   {
+			if(cd( tokens[i])!=0)
+			{
+			   abort=1;
+			}
+			free(tokens[i]);
    	   }
-
-
-   if(abort==1){
-   currDir = original;
-   return -1;
+   if(abort==1)
+   {
+	   currDir = original;
+	   return -1;
    }
    else
-	   return 0;
+		return 0;
 }
 /*Removes the first char from a string*/
 void strChomp(euint8* s)
@@ -768,8 +604,6 @@ euint32 extract_little(char* str, euint32 ofset, euint32 n)
     }
     return(little_endian);
 }
-
-
 
 euint32 extract_big(char* str, euint32 ofset, euint32 n)
 {
@@ -848,10 +682,8 @@ euint8 cd(euint8* FolderName)
 		return 0;
 	if(FolderName=="..")
 	{
-	return -1;
+		return -1;
 	}
-	//else we are going deeper into the maze
-
 	read_directory(File2,Folder2,currDir);
 	euint8* search = (euint8*)malloc(strlen(FolderName) - LastIndexOf('/',FolderName));
 	strCopyLen(FolderName,search,LastIndexOf('/',FolderName));
@@ -860,10 +692,10 @@ euint8 cd(euint8* FolderName)
 	{
 		if(strcompare2(Folder2[counter].name,search)==0)
 		{
-				//we have found our folder
+			//we have found our folder
 			//now we need to update our pointers
 			currDir = Folder2[counter];
-//free(search);
+			//free(search);
 			return 0;
 		}
 		++counter;
@@ -910,16 +742,14 @@ euint32 strcompare2(char* buf1,char* buf2)
 	euint32 index=0;
 	while(buf1[index] != 0 ||buf2[index] != 0  )
 	{
-		if(buf1[index]!= buf2[index]){
-
+		if(buf1[index]!= buf2[index])
+		{
 			return -1;
 		}
-
 		if(( buf2[index]== 0|| buf1[index]== 0))
-		{//ended pre-maturely
+		{ //ended pre-maturely
 			return -1;
 		}
-
 	index++;
 	}
 	return 0;
@@ -963,7 +793,6 @@ euint8 ls(SDfile* File,SDfolder* Folder)
 				sprintf(buffer,"%s.%s\t%dKB\r\n",File[counter].name,File[counter].extension,(File[counter].file_size/1024));
 				UART_write(buffer);
 				empty=1;
-
 			}
 	counter=0;
 	for(counter=0;counter<20;counter++)
@@ -973,14 +802,12 @@ euint8 ls(SDfile* File,SDfolder* Folder)
 				sprintf(buffer,"%s\t<DIR>\r\n",Folder[counter].name);
 				UART_write(buffer);
 				empty=1;
-
 			}
 	if(empty==0)
 	{
 		printf("Empty Folder\n");
 		sprintf(buffer,"Empty Folder\r\n");
 		UART_write(buffer);
-
 	}
 return 0;
 }
@@ -1042,19 +869,14 @@ euint32 read_file_chain_length(SDfile fileInfo)
 	euint32 modulus = 0;
 	while(current_address < 0x0FFFFFF8)
 		{
-
 			//NOTE 0x0FFFFFF7 means the cluster is bad so we may need to skip
 			euint32 FATNumber = (current_address*4)/512;// will floor for us
-
 			// Read in the new sector
 			sd_readSector(FAT_start+FATNumber,buffer1);	//reads FAT
-
 			// Find the offset from start of FATNumber as per the modulus
 			modulus = (current_address/4)%512;
-
 			// Increment now to try and catch the last entry as well
 			length++;
-
 			// Get next address
 			current_address = (euint32)buffer1[current_address*4+3] << 24 |
 					(euint32)buffer1[current_address*4+2] << 16 |
@@ -1066,36 +888,17 @@ euint32 read_file_chain_length(SDfile fileInfo)
 	return length;
 }
 
-euint8 read_file_chunk(SDfile fileInfo,euint8* buffer,euint32 bufferLength,euint32 bufferNo)
-{
-		euint32 chainLength = read_file_chain_length(fileInfo);
-/**
- * Plan :
- * Find the length of the chain
- * malloc into the struct a buffer big enough to store the sector addresses for the
- * 	file
- * Then we pass back to the user (change this progs header oops) or store it
- * then the user can request a chunk and we can use that to quickly lookup the address
- * 	for the chunk we wish to load
- * 	Good luck, message me questions on FB ill try to be online :S
- *
- * */
-
 }
 euint8 read_directory(SDfile* File,SDfolder* Folders,SDfolder CurrentFolder)
 {
 	euint8 buffer1[size];
 	euint8 buffer2[size];
-
 	euint8 LoopC =0;
-
 	euint32 current_address = (CurrentFolder.startL | (euint32)CurrentFolder.startH<<16);
 	euint32 clust_read_pos;
 	euint32 fileCount=0,folderCount=0;
 	FAT_start = LBAbegin + Part_Boot.res_sec;
 	clust_start = 2*Part_Boot.sec_per_FAT + FAT_start;
-
-
 	euint32 y=0;
 	for(y=0;y<20;y++)
 	{
@@ -1105,11 +908,7 @@ euint8 read_directory(SDfile* File,SDfolder* Folders,SDfolder CurrentFolder)
 		Folders[y].startH=0;
 		Folders[y].startL=0;
 		Folders[y].valid=0;
-
 	}
-
-	//read FAT table
-
 
 	while(current_address < 0x0FFFFFF8)
 	{
@@ -1242,7 +1041,6 @@ euint8 read_directory(SDfile* File,SDfolder* Folders,SDfolder CurrentFolder)
 	}
 	return(0);
 }
-
 
 void UARTListener(char buffer[],euint32 uart)
 {
