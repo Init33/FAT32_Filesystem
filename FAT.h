@@ -68,7 +68,6 @@ euint8 putty_ls();
 void strChomp(euint8* s);
 euint32 read_file_chain_length(SDfile fileInfo);
 euint8 putty_cd(euint8* path);
-euint8 read_file_chunk(SDfile fileInfo,euint8* buffer,euint32 bufferLength,euint32 bufferNo);
 alt_8 UART_write(alt_8* str);
 alt_8 list_directory(char no_args, char* arg_strings[]);
 alt_8 change_directory(char no_args, char* arg_strings[]);
